@@ -1,0 +1,101 @@
+version: '3.7'
+services:
+  kratos-migrate:
+    image: oryd/kratos:v0.11.1
+    environment:
+      - DSN=sqlite:///var/lib/sqlite/db.sqlite?_fk=true&mode=rwc
+    volumes:
+      - type: volume
+        source: kratos-sqlite
+        target: /var/lib/sqlite
+        read_only: false
+      - type: bind
+        source: ./kratos.yml
+        target: /etc/config/kratos/kratos.yml
+    command: -c /etc/config/kratos/kratos.yml migrate sql -e --yes
+    restart: on-failure
+    networks:
+      - intranet
+  kratos-selfservice-ui-node:
+    image: ory-ui:latest
+    environment:
+      - KRATOS_PUBLIC_URL=http://kratos:4433/
+      - HYDRA_ADMIN_URL=http://hydra:4445/
+    ports:
+      - '4455:3000'
+    networks:
+      - intranet
+    restart: on-failure
+  kratos:
+    depends_on:
+      - kratos-migrate
+    image: oryd/kratos:v0.11.1
+    ports:
+      - '4433:4433' # public
+      - '4434:4434' # admin
+    restart: unless-stopped
+    environment:
+      - DSN=sqlite:///var/lib/sqlite/db.sqlite?_fk=true
+      - LOG_LEVEL=trace
+    command: serve -c /etc/config/kratos/kratos.yml --dev --watch-courier
+    volumes:
+      - type: volume
+        source: kratos-sqlite
+        target: /var/lib/sqlite
+        read_only: false
+      - type: bind
+        source: ./kratos.yml
+        target: /etc/config/kratos/kratos.yml
+      - ./identity.schema.json:/etc/config/kratos/identity.schema.json
+    networks:
+      - intranet
+  hydra:
+    image: oryd/hydra:v2.0.3
+    ports:
+      - "4444:4444" # Public port
+      - "4445:4445" # Admin port
+    command: serve -c /etc/config/hydra/hydra.yml all --dev
+    volumes:
+      - type: volume
+        source: hydra-sqlite
+        target: /var/lib/sqlite
+        read_only: false
+      - type: bind
+        source: ./hydra.yml
+        target: /etc/config/hydra/hydra.yml
+    environment:
+      - DSN=sqlite:///var/lib/sqlite/db.sqlite?_fk=true
+      - CORS_DEBUG=1
+    restart: unless-stopped
+    depends_on:
+      - hydra-migrate
+    networks:
+      - intranet
+  hydra-migrate:
+    image: oryd/hydra:v2.0.3
+    environment:
+      - DSN=sqlite:///var/lib/sqlite/db.sqlite?_fk=true
+    command: migrate -c /etc/config/hydra/hydra.yml sql -e --yes
+    volumes:
+      - type: volume
+        source: hydra-sqlite
+        target: /var/lib/sqlite
+        read_only: false
+      - type: bind
+        source: ./hydra.yml
+        target: /etc/config/hydra/hydra.yml
+    restart: on-failure
+    networks:
+      - intranet
+  mailslurper:
+    image: oryd/mailslurper:latest-smtps
+    ports:
+      - '4436:4436'
+      - '4437:4437'
+    networks:
+      - intranet
+networks:
+  intranet:
+volumes:
+  kratos-sqlite:
+  hydra-sqlite:
